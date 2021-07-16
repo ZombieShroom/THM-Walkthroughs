@@ -1,0 +1,217 @@
+
+Lets get the ball rolling with an nmap scan : 
+nmap -A -sV -sC 10.10.63.216      
+Starting Nmap 7.91 ( https://nmap.org ) at 2021-07-16 10:23 EDT
+Nmap scan report for 10.10.63.216
+Host is up (0.040s latency).
+Not shown: 998 closed ports
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 7.2p2 Ubuntu 4ubuntu2.8 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   2048 58:14:75:69:1e:a9:59:5f:b2:3a:69:1c:6c:78:5c:27 (RSA)
+|   256 23:f5:fb:e7:57:c2:a5:3e:c2:26:29:0e:74:db:37:c2 (ECDSA)
+|_  256 f1:9b:b5:8a:b9:29:aa:b6:aa:a2:52:4a:6e:65:95:c5 (ED25519)
+80/tcp open  http    Apache httpd 2.4.18 ((Ubuntu))
+|_http-server-header: Apache/2.4.18 (Ubuntu)
+|_http-title: Can You Find Them All?
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 10.89 seconds
+
+Nothing too fancy, just a web and ssh server. Lets get a gobuster running and look through the website : 
+
+IP address just takes us to the main Apache2 landing page so lets check the S/C for any hidden clues or flags. About half way down the page we get the following : 
+</style>
+    <script type="text/javascript">
+    	const randomPokemon = [
+    		'Bulbasaur', 'Charmander', 'Squirtle',
+    		'Snorlax',
+    		'Zapdos',
+    		'Mew',
+    		'Charizard',
+    		'Grimer',
+    		'Metapod',
+    		'Magikarp'
+    	];
+    	const original = randomPokemon.sort((pokemonName) => {
+    		const [aLast] = pokemonName.split(', ');
+    	});
+
+    	console.log(original);
+      
+We will keep this in our back pocket for now as this could be needed later on. If you scroll to the bottom of the page there is a clue about where we need to go next :
+
+ </p>
+        </div>
+        <pokemon>:<hack_the_pokemon>
+        	<!--(Check console for extra surprise!)-->
+      </div>
+      
+After looking in the console and all the other options in the inspector......nothing. Look at the above again - Does that look like some credentials to you :O, lets try those 
+in the SSH server. Looks like we are in : 
+ssh pokemon@10.10.63.216                     
+The authenticity of host '10.10.63.216 (10.10.63.216)' can't be established.
+ECDSA key fingerprint is SHA256:mXXTCQORSu35gV+cSi+nCjY/W0oabQFNjxuXUDrsUHI.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added '10.10.63.216' (ECDSA) to the list of known hosts.
+pokemon@10.10.63.216's password: 
+Welcome to Ubuntu 16.04.6 LTS (GNU/Linux 4.15.0-112-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+84 packages can be updated.
+0 updates are security updates.
+
+
+The programs included with the Ubuntu system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
+
+pokemon@root:~$ 
+
+(on a side note, gobuster scan found nothing other than /server-status)
+
+Firstly lets run a ls command to see what we got :
+pokemon@root:~$ ls
+Desktop  Documents  Downloads  examples.desktop  Music  Pictures  Public  Templates  Videos
+
+lets start at the begining and go into Desktop :
+pokemon@root:~$ cd Desktop
+pokemon@root:~/Desktop$ ls
+P0kEmOn.zip
+
+We got a pokemon.zip file which we can unzip which gives up a grass-type.txt file. unfortunately running cat on that file just gives us a hex code : 
+pokemon@root:~/Desktop$ unzip P0kEmOn.zip 
+Archive:  P0kEmOn.zip
+   creating: P0kEmOn/
+  inflating: P0kEmOn/grass-type.txt  
+pokemon@root:~/Desktop$ ls
+P0kEmOn  P0kEmOn.zip
+pokemon@root:~/Desktop$ cd P0kEmOn/
+pokemon@root:~/Desktop/P0kEmOn$ ls
+grass-type.txt
+pokemon@root:~/Desktop/P0kEmOn$ cat grass-type.txt 
+50 6f 4b 65 4d 6f 4e 7b 42 75 6c 62 61 73 61 75 72 7d
+
+Lets go to our favourite hash decrypter site and see if we can decrypt this - hashes.com
+506f4b654d6f4e7b42756c6261736175727d:PoKeMoN{*********} = first flag
+
+Looking through the folders there is nothing in any of them EXCEPT for the "Videos" folder. This then leads us into directory after directory :
+pokemon@root:~/Videos$ ls
+Gotta
+pokemon@root:~/Videos$ cd Gotta/
+pokemon@root:~/Videos/Gotta$ ls
+Catch
+pokemon@root:~/Videos/Gotta$ cd Catch/
+pokemon@root:~/Videos/Gotta/Catch$ ls
+Them
+pokemon@root:~/Videos/Gotta/Catch$ cd th
+-bash: cd: th: No such file or directory
+pokemon@root:~/Videos/Gotta/Catch$ cd Them/
+pokemon@root:~/Videos/Gotta/Catch/Them$ ls
+ALL!
+pokemon@root:~/Videos/Gotta/Catch/Them$ cd ALL\!/
+pokemon@root:~/Videos/Gotta/Catch/Them/ALL!$ ls
+Could_this_be_what_Im_looking_for?.cplusplus
+pokemon@root:~/Videos/Gotta/Catch/Them/ALL!$ 
+
+(not gonna lie I smiled while working through these directories)
+The "Could_this_be_what_Im_looking_for?.cplusplus" looks suspicsious - running cat gives us : 
+
+pokemon@root:~/Videos/Gotta/Catch/Them/ALL!$ cat Could_this_be_what_Im_looking_for\?.cplusplus 
+# include <iostream>
+
+int main() {
+        std::cout << "ash : pika****"
+        return 0;
+Which again, looks like some SSH credentials. Did we just find a possible root user?
+>ssh ash@10.10.63.216                         
+once in, I automatically cd to the home directory and cat out the "roots-pokemon.txt" file :
+$ whoami
+ash
+$ ls
+bin  boot  cdrom  dev  etc  home  initrd.img  initrd.img.old  lib  lib64  lost+found  media  mnt  opt  proc  root  run  sbin  snap  srv  sys  tmp  usr  var  vmlinuz  vmlinuz.old
+$ cd home
+$ ls
+ash  pokemon  roots-pokemon.txt
+$ cat ro
+cat: ro: No such file or directory
+$ cat roots-pokemon.txt
+Pika****
+
+Would you look at that, roots pokemon already :D
+
+But we still have to find the water and fire type pokemon.
+
+Going back to our original connection lets have a think about how we can search for these 2 pokemon. Assuming the water and fire type .txt files will be named the same as the 
+grass-type.txt i run the "locate" command to search for "water-type.txt" which gives us the location:
+pokemon@root:/$ locate water-type.txt
+/var/www/html/water-type.txt
+
+Looks like the data in this is also encrypted : 
+pokemon@root:/var/www/html$ cat water-type.txt 
+Ecgudfxq_EcGmP{Ecgudfxq}
+
+Lets try our trusty hashes.com to see if this can crack it........ no such luck. Time to use our google-fu!
+After much searching I came across and entry for a "Ceaser Cipher" and ran it from this site - https://www.dcode.fr/caesar-cipher. It does ask for a shift (assuming this means it
+shifts the letter along X amount from the original code i.e a shift of 1 would = A=B - or something to that effect). As there is no mention of a shift value i just left this
+field blank and got the following options : 
+
+	Dbftcewp_DbFlO{Dbftcewp}
++24	Geiwfhzs_GeIoR{Geiwfhzs}
++2	Caesbdvo_CaEkN{Caesbdvo}
++12	Squirtle_SqUaD{Squirtle}
++15	Pnrfoqib_PnRxA{Pnrfoqib}
++16	Omqenpha_OmQwZ{Omqenpha}
++10	Uswktvng_UsWcF{Uswktvng}
++17	Nlpdmogz_NlPvY{Nlpdmogz}
++4	Aycqzbtm_AyCiL{Aycqzbtm}
++23	Hfjxgiat_HfJpS{Hfjxgiat}
++18	Mkoclnfy_MkOuX{Mkoclnfy}
++14	Qosgprjc_QoSyB{Qosgprjc}
++11	Trvjsumf_TrVbE{Trvjsumf}
++3	Bzdracun_BzDjM{Bzdracun}
++25	Fdhvegyr_FdHnQ{Fdhvegyr}
++20	Kimajldw_KiMsV{Kimajldw}
++13	Rpthqskd_RpTzC{Rpthqskd}
++19	Ljnbkmex_LjNtW{Ljnbkmex}
++9	Vtxluwoh_VtXdG{Vtxluwoh}
++8	Wuymvxpi_WuYeH{Wuymvxpi}
++6	Ywaoxzrk_YwAgJ{Ywaoxzrk}
++22	Igkyhjbu_IgKqT{Igkyhjbu}
++5	Zxbpyasl_ZxBhK{Zxbpyasl}
++21	Jhlzikcv_JhLrU{Jhlzikcv}
++7	Xvznwyqj_XvZfI{Xvznwyqj}
+
+Anyone who is a fan of the series will be able to find the answer in this list so thats the water type found.
+
+Lastly, we need the fire type.
+
+Using the same process to find the water type file I use the locate function again to search for the fire type file and see that its stored here : 
+
+/etc/why_am_i_here?/fire-type.txt
+
+Running cat on the file i get the following : 
+UDBrM20wbntDaGFybWFuZGVyfQ==
+
+My previous expierence it telling me its a base 64 enryption (mainly cause of the == at the end) so lets decrypt this one using a slightly different way other than just using hashes.com 
+(which also works)
+
+>echo UDBrM20wbntDaGFybWFuZGVyfQ== | base64 -d
+And there we have the fire type :)
+
+
+
+
+
+
+
+
+
+
